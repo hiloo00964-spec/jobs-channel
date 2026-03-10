@@ -4,14 +4,14 @@ import requests
 import time
 import google.generativeai as genai
 
-# --- الإعدادات (مطابقة تماماً للصورة اللي دزيتها) ---
+# --- الإعدادات (تقرأ من السيركت الخاص بك) ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
 GMY_API_KEY = os.getenv('GMY')
 MY_CHANNEL = os.getenv('TARGET_CHANNEL') 
 CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
-# إعداد جيميناي للتلخيص وحذف الحشو
+# إعداد جيميناي
 genai.configure(api_key=GMY_API_KEY)
 model = genai.GenerativeModel('gemini-pro')
 
@@ -19,39 +19,42 @@ model = genai.GenerativeModel('gemini-pro')
 SOURCES = ['JobsonIraq', 'iraq_jobs_1', 'vacancies_iraq', 'iraqijobs24']
 
 def summarize_with_gemini(text):
-    """تلخيص النص وحذف الحشو مع الحفاظ على المعلومات الأساسية"""
+    """تلخيص احترافي يمسح الحشو والروابط القديمة واليوزرات"""
     try:
         prompt = (
-            "قم بتلخيص نص الوظيفة التالي باختصار شديد جداً. استخرج فقط: (المهنة، الشركة، المكان، وطريقة التقديم). "
-            "احذف أي روابط خارجية أو إعلانات للقنوات. "
-            "أضف هاشتاقات مناسبة للمحافظة والتخصص في النهاية:\n\n"
-            f"{text}"
+            "أنت خبير تلخيص وظائف عراقية. قم بمعالجة النص التالي:\n"
+            "1. ابدأ المنشور فوراً بتفاصيل الوظيفة بدون أي مقدمات (مثل إعلان وظيفة أو غيرها).\n"
+            "2. إذا كان النص إعلاناً لخدمة (سيفي، CV، تصميم، رصيد، كارتات) وليس وظيفة حقيقية، أجب بكلمة 'إهمال'.\n"
+            "3. استخلص فقط: (المهنة، الشركة، المكان، طريقة التقديم).\n"
+            "4. احذف أي يوزرات تليجرام تبدأ بـ @ أو روابط قنوات أخرى نهائياً.\n"
+            "5. أضف هاشتاقات مناسبة للمحافظة والتخصص في النهاية.\n\n"
+            f"النص:\n{text}"
         )
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
         print(f"Gemini Error: {e}")
-        return text
+        return "إهمال"
 
 def clean_job_text(html_text):
-    """فلترة الصور والفيديو وتنظيف النصوص"""
-    # إذا كان المنشور يحتوي على صورة أو فيديو يتم تجاهله فوراً حسب الاتفاق
+    """فلترة الميديا والكلمات الإعلانية الممنوعة"""
+    # تجاهل الصور والفيديو
     if 'tgme_widget_message_photo' in html_text or 'tgme_widget_message_video' in html_text:
         return ""
     
-    # تنظيف الـ HTML
+    # قائمة سوداء سريعة قبل إرسال النص لجيميناي
+    blacklist = ["سيفي", "CV", "تصميم", "كارتات", "رصيد", "ممول"]
+    for word in blacklist:
+        if word in html_text:
+            return ""
+
+    # تحويل الـ HTML لنص صافي
     text = html_text.replace('</div>', ' ').replace('<br>', '\n').replace('<br/>', '\n')
     text = re.sub(r'<[^>]+>', '', text) 
-    
-    # حذف الهاشتاقات والروابط القديمة قبل التلخيص
-    text = re.sub(r'#\w+', '', text)
-    text = re.sub(r'https?://\S+', '', text)
-    text = re.sub(r't\.me/\S+', '', text)
-    
     return text.strip()
 
 def post_to_telegram(text):
-    """إرسال المنشور النهائي إلى قناتك"""
+    """إرسال المنشور بصيغة Markdown"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {
@@ -62,8 +65,7 @@ def post_to_telegram(text):
         }
         r = requests.post(url, data=payload)
         return r.status_code == 200
-    except Exception as e:
-        print(f"Telegram Post Error: {e}")
+    except Exception:
         return False
 
 def main():
@@ -74,15 +76,13 @@ def main():
     for src in SOURCES:
         try:
             res = requests.get(f"https://t.me/s/{src}", timeout=15)
-            # استخراج كتل الرسائل بالكامل لفحص وجود ميديا
             messages = re.findall(r'<div class="tgme_widget_message_wrap[^>]*>(.*?)<div class="tgme_widget_message_footer', res.text, re.DOTALL)
             
             for msg_html in reversed(messages):
-                # فحص الميديا (صور/فيديو)
+                # شرط النص الصافي فقط
                 if 'tgme_widget_message_photo' in msg_html or 'tgme_widget_message_video' in msg_html:
                     continue
                 
-                # استخراج النص
                 text_match = re.search(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', msg_html, re.DOTALL)
                 if not text_match: continue
                 
@@ -95,13 +95,17 @@ def main():
                 all_found_jobs.append({'raw_text': clean_text, 'sig': sig})
         except: continue
 
-    # نأخذ فقط آخر 4 وظائف نصية جديدة بكل جولة
+    # جلب آخر 4 وظائف جديدة فقط
     pending_jobs = all_found_jobs[:4]
 
     for index, job in enumerate(pending_jobs):
         summarized_text = summarize_with_gemini(job['raw_text'])
         
-        # التنسيق النهائي مع رابط القناة من السيركت
+        # تخطي إذا كان إعلان أو نص غير مفيد
+        if "إهمال" in summarized_text or len(summarized_text) < 15:
+            continue
+        
+        # التنسيق النهائي الصافي مع الرابط
         final_post = (
             f"{summarized_text}\n\n"
             f"📍 للمزيد اشترك الآن :-\n"
@@ -110,10 +114,8 @@ def main():
         
         if post_to_telegram(final_post):
             with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(job['sig'] + "\n")
-            print(f"تم نشر الوظيفة {index + 1} بنجاح.")
-            time.sleep(10) # فاصل زمني بسيط
-        else:
-            print("فشل في النشر.")
+            print(f"تم نشر الوظيفة {index + 1}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
