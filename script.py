@@ -12,21 +12,27 @@ MY_CHANNEL = os.getenv('TARGET_CHANNEL')
 CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
-# إعداد جيميناي (تصحيح طريقة الاستدعاء)
-genai.configure(api_key=GMY_API_KEY)
-model = genai.GenerativeModel('gemini-pro') # استخدام النسخة المستقرة Pro
-
 def summarize_with_gemini(text):
+    """استدعاء جيميناي عبر رابط مباشر لتجنب خطأ 404 وضمان التلخيص"""
     try:
-        prompt = f"قم بتلخيص هذه الوظيفة العراقية باختصار (نوع الوظيفة، الشركة، المكان، التقديم) بشكل نقاط. إذا لم تكن وظيفة أكتب كلمة 'تجاهل':\n\n{text}"
-        response = model.generate_content(prompt)
-        if response.text:
-            res = response.text.strip()
-            if "تجاهل" in res: return "إهمال"
-            return res
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": f"أنت خبير تعيينات عراقي. لخص النص التالي كنقاط (نوع الوظيفة، الشركة، الموقع، التقديم). إذا لم يكن المنشور وظيفة (مثل إعلان قناة أو نصيحة) أجب بكلمة 'تجاهل' فقط:\n\n{text}"
+                }]
+            }]
+        }
+        res = requests.post(url, json=payload, timeout=20)
+        data = res.json()
+        
+        # استخراج النص من الاستجابة
+        if 'candidates' in data and data['candidates']:
+            output = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            return output if "تجاهل" not in output else "إهمال"
         return "إهمال"
     except Exception as e:
-        print(f"⚠️ Gemini API Note: {e}")
+        print(f"⚠️ تنبيه الذكاء الاصطناعي: {e}")
         return "إهمال"
 
 def post_to_telegram(text):
@@ -42,32 +48,40 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # تم حذف JobsonIraq من هنا لأنها قناتك
+    # المصادر الجديدة التي طلبتها
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
     for src in SOURCES:
         try:
             print(f"🔍 فحص مصدر خارجي: {src}")
             res = requests.get(f"https://t.me/s/{src}", headers=headers, timeout=15)
+            # استخراج محتوى الرسائل النصية
             messages = re.findall(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', res.text, re.DOTALL)
             
-            for msg_html in reversed(messages[-10:]):
+            count_found = 0
+            for msg_html in reversed(messages[-12:]):
+                # تنظيف النص من وسوم HTML
                 raw_text = re.sub(r'<[^>]+>', '', msg_html).strip()
                 if len(raw_text) < 50: continue
                 
+                # منع التكرار (استخدام أول 80 حرف كبصمة)
                 sig = raw_text[:80]
                 if sig in history: continue
                 
+                # التلخيص بواسطة جيميناي
                 summarized = summarize_with_gemini(raw_text)
                 
-                if summarized != "إهمال":
+                if summarized != "إهمال" and len(summarized) > 15:
                     final_post = f"💼 *فرصة عمل جديدة*\n\n{summarized}\n\n📍 للمزيد اشترك الآن :-\n{CHANNEL_LINK}"
                     if post_to_telegram(final_post):
                         with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
                         print(f"✅ تم النشر بنجاح من {src}")
-                        time.sleep(10)
-                        break 
+                        count_found += 1
+                        time.sleep(12)
+                        break # نشر وظيفة واحدة من كل مصدر لضمان التنوع
+            if count_found == 0:
+                print(f"ℹ️ {src}: لا توجد وظائف نصية جديدة.")
         except Exception as e:
             print(f"⚠️ خطأ في {src}: {e}")
 
