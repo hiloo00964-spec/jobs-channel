@@ -2,7 +2,7 @@ import os
 import re
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import google.generativeai as genai
 
 # --- الإعدادات (Secrets) ---
@@ -12,45 +12,24 @@ MY_CHANNEL = os.getenv('TARGET_CHANNEL')
 CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
-# إعداد جيميناي
+# إعداد جيميناي بأحدث طريقة
 genai.configure(api_key=GMY_API_KEY)
-
-def is_work_time():
-    """توقيت العراق (GMT+3)"""
-    current_hour = (datetime.utcnow().hour + 3) % 24
-    return 8 <= current_hour < 23
-
-def manage_history_file():
-    if os.path.exists(DB_FILE):
-        file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(DB_FILE))
-        if file_age > timedelta(days=3):
-            os.remove(DB_FILE)
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("INIT\n")
-
-def get_latest_model():
-    try:
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for m in models:
-            if '1.5-flash' in m: return m
-        return 'models/gemini-1.5-flash'
-    except: return 'models/gemini-1.5-flash'
-
-SELECTED_MODEL = get_latest_model()
-model = genai.GenerativeModel(SELECTED_MODEL)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def summarize_with_gemini(text):
     try:
-        prompt = (
-            "أنت خبير تلخيص وظائف عراقي. استخلص فقط المعلومات التالية بشكل نقاط:\n"
-            "- نوع الوظيفة\n- اسم الشركة أو الجهة\n- موقع العمل\n- طريقة التقديم\n"
-            "احذف أي روابط خارجية أو معرفات قنوات أخرى. إذا كان النص ليس وظيفة، أجب بكلمة 'إهمال'.\n\n"
-            f"النص:\n{text}"
-        )
+        # برومبت (Prompt) بسيط ومباشر لتجنب الرفض التقني
+        prompt = f"قم بتلخيص هذه الوظيفة العراقية باختصار (نوع الوظيفة، الشركة، المكان، التقديم) بشكل نقاط واضحة. إذا لم تكن وظيفة أكتب كلمة 'تجاهل' فقط:\n\n{text}"
         response = model.generate_content(prompt)
-        res_text = response.text.strip()
-        return res_text if "إهمال" not in res_text else "إهمال"
-    except: return "إهمال"
+        # التأكد من استلام نص سليم
+        if response and response.text:
+            res = response.text.strip()
+            if "تجاهل" in res: return "إهمال"
+            return res
+        return "إهمال"
+    except Exception as e:
+        print(f"⚠️ Gemini API Note: {e}")
+        return "إهمال"
 
 def post_to_telegram(text):
     try:
@@ -61,60 +40,41 @@ def post_to_telegram(text):
     except: return False
 
 def main():
-    if not is_work_time(): return
-    manage_history_file()
+    # التأكد من وجود ملف التاريخ
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    all_found_jobs = []
-    # قنوات المصدر - تأكد من صحة المعرفات
     SOURCES = ['JobsonIraq', 'iraq_jobs_1', 'vacancies_iraq', 'iraqijobs24', 'Iraqi_jobs']
-    
-    # رأس HTTP للتظاهر بأننا متصفح حقيقي لتجنب حجب تليجرام
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
     for src in SOURCES:
         try:
-            print(f"🔍 فحص مصدر الوظائف: {src}")
-            # أضفنا سطر عشوائي للرابط لتجنب الكاش (Cache) الخاص بتليجرام
-            res = requests.get(f"https://t.me/s/{src}?before={int(time.time())}", headers=headers, timeout=20)
-            
-            # استخراج محتوى الرسائل بشكل أوسع
+            print(f"🔍 فحص: {src}")
+            res = requests.get(f"https://t.me/s/{src}", headers=headers, timeout=15)
+            # استخراج النصوص فقط
             messages = re.findall(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', res.text, re.DOTALL)
             
-            count_new = 0
-            for msg_html in reversed(messages[-15:]): # فحص آخر 15 رسالة
-                # تنظيف النص
+            for msg_html in reversed(messages[-10:]):
                 raw_text = re.sub(r'<[^>]+>', '', msg_html).strip()
-                
-                # تجاهل المنشورات القصيرة جداً (ليست وظائف غالباً)
                 if len(raw_text) < 50: continue
                 
-                # التحقق من التكرار
-                sig = raw_text[:100]
+                sig = raw_text[:80] # بصمة المنشور
                 if sig in history: continue
                 
-                all_found_jobs.append({'raw_text': raw_text, 'sig': sig})
-                count_new += 1
-            print(f"✅ {src}: وجدنا {count_new} منشورات محتملة.")
+                # إرسال للذكاء الاصطناعي للتلخيص
+                summarized = summarize_with_gemini(raw_text)
+                
+                if summarized != "إهمال":
+                    final_post = f"💼 *فرصة عمل جديدة*\n\n{summarized}\n\n📍 للمزيد اشترك الآن :-\n{CHANNEL_LINK}"
+                    if post_to_telegram(final_post):
+                        with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
+                        print(f"✅ تم نشر وظيفة من {src}")
+                        time.sleep(10)
+                        break # نشر وظيفة واحدة من كل مصدر في الدورة الواحدة لتجنب الحظر
         except Exception as e:
-            print(f"⚠️ خطأ في سحب {src}: {e}")
-
-    if not all_found_jobs:
-        print("ℹ️ لم يتم العثور على أي منشورات نصية جديدة تطابق الشروط.")
-        return
-
-    # النشر
-    for job in all_found_jobs[:4]: # نشر 4 وظائف في كل دورة كحد أقصى
-        summarized = summarize_with_gemini(job['raw_text'])
-        if summarized == "إهمال": continue
-        
-        final_post = f"💼 *فرصة عمل جديدة*\n\n{summarized}\n\n📍 للمزيد اشترك الآن :-\n{CHANNEL_LINK}"
-        
-        if post_to_telegram(final_post):
-            with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(job['sig'] + "\n")
-            print("📌 تم نشر وظيفة بنجاح.")
-            time.sleep(10)
+            print(f"⚠️ خطأ في {src}: {e}")
 
 if __name__ == "__main__":
     main()
