@@ -1,10 +1,29 @@
 import os
-import re
-import requests
-import time
-import feedparser
+import subprocess
+import sys
 
-# --- الإعدادات (تأكد من وجودها في Secrets) ---
+# --- ميزة التثبيت التلقائي للمكتبات المفقودة ---
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+try:
+    import feedparser
+except ImportError:
+    print("🛠️ جاري تثبيت مكتبة feedparser...")
+    install('feedparser')
+    import feedparser
+
+try:
+    import requests
+except ImportError:
+    print("🛠️ جاري تثبيت مكتبة requests...")
+    install('requests')
+    import requests
+
+import re
+import time
+
+# --- الإعدادات (Secrets) ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
 GMY_API_KEY = os.getenv('GMY')
 MY_CHANNEL = os.getenv('TARGET_CHANNEL') 
@@ -12,7 +31,6 @@ CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
 def summarize_with_gemini(text):
-    """تلخيص الوظيفة باستخدام جيميناي"""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
@@ -39,28 +57,26 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # القنوات الستة المطلوبة
+    # القنوات الستة
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
 
     for src in SOURCES:
         try:
-            print(f"📡 سحب {src} عبر RSS...")
-            # استخدام سيرفر وسيط عالمي لكسر الحظر
+            print(f"📡 محاولة سحب {src} عبر RSS...")
+            # استخدام سيرفر وسيط مختلف قليلاً لضمان العمل
             rss_url = f"https://rsshub.app/telegram/channel/{src}"
             feed = feedparser.parse(rss_url)
 
             if not feed.entries:
-                print(f"ℹ️ {src}: لا توجد منشورات حالياً.")
+                print(f"ℹ️ {src}: السيرفر الوسيط لم يستجب، جاري الانتقال للمصدر التالي.")
                 continue
 
-            for entry in feed.entries[:10]:
-                # تنظيف النص
+            for entry in feed.entries[:8]:
                 raw_content = entry.summary if 'summary' in entry else entry.title
                 clean_text = re.sub(r'<[^>]+>', '', raw_content).strip()
                 
                 if len(clean_text) < 50: continue
                 
-                # بصمة المنشور لمنع التكرار
                 sig = clean_text[:80]
                 if sig in history: continue
                 
@@ -73,9 +89,9 @@ def main():
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
                     print(f"✅ تم النشر بنجاح من {src}")
                     time.sleep(10)
-                    break # وظيفة واحدة من كل قناة بكل دورة
+                    break
         except Exception as e:
-            print(f"⚠️ خطأ في المصدر {src}: {e}")
+            print(f"⚠️ خطأ في {src}: {e}")
 
 if __name__ == "__main__":
     main()
