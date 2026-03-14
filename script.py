@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import time
+import xml.etree.ElementTree as ET
 
 # --- الإعدادات ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
@@ -14,8 +15,7 @@ def summarize_with_gemini(text):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
-            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط: (نوع الوظيفة، الشركة، المكان، التقديم). إذا كانت مجرد إعلان لقناة أخرى أو نصيحة أجب بكلمة 'تجاهل':\n\n{text}"}]}],
-            "safetySettings": [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
+            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط (نوع الوظيفة، الشركة، المكان، التقديم). إذا لم تكن وظيفة أجب بكلمة 'تجاهل':\n\n{text}"}]}]
         }
         res = requests.post(url, json=payload, timeout=30)
         data = res.json()
@@ -36,29 +36,28 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
+    # المصادر باستخدام جسر RSS (تجاوز حظر تليجرام)
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
-    
-    # استخدام هوية متصفح "بوت جوجل" لكي يفتح تليجرام الأبواب للبوت
-    headers = {'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'}
 
     for src in SOURCES:
         try:
-            print(f"📡 محاولة اختراق سحب البيانات من: {src}")
-            res = requests.get(f"https://t.me/s/{src}", headers=headers, timeout=30)
+            print(f"📡 سحب البيانات عبر RSS للمصدر: {src}")
+            # نستخدم خدمة rsshub أو rss-bridge المفتوحة لتجاوز الحظر
+            rss_url = f"https://rsshub.app/telegram/channel/{src}"
+            res = requests.get(rss_url, timeout=30)
             
-            # استراتيجية جديدة: سحب أي نص موجود داخل "رسالة" مهما كان نوعها
-            # نبحث عن الفقرات النصية مباشرة
-            messages = re.findall(r'<div class="[^"]*text[^"]*"[^>]*>(.*?)</div>', res.text, re.DOTALL)
-            
-            # إذا فشل، نسحب كل الـ div التي قد تحتوي نصاً
-            if not messages:
-                messages = re.findall(r'<div[^>]*dir="auto"[^>]*>(.*?)</div>', res.text, re.DOTALL)
+            # قراءة محتوى الـ XML
+            root = ET.fromstring(res.text)
+            items = root.findall('.//item')
 
-            published = 0
-            for msg_html in reversed(messages[-20:]):
-                # تنظيف وتحويل النص
-                clean_text = re.sub(r'<br\s*/?>', '\n', msg_html)
-                clean_text = re.sub(r'<[^>]+>', '', clean_text).strip()
+            for item in items[:10]: # فحص آخر 10 منشورات
+                title = item.find('title').text if item.find('title') is not None else ""
+                description = item.find('description').text if item.find('description') is not None else ""
+                
+                # دمج العنوان والوصف للحصول على النص الكامل
+                full_text = f"{title}\n{description}"
+                # تنظيف النص من أكواد HTML
+                clean_text = re.sub(r'<[^>]+>', '', full_text).strip()
                 
                 if len(clean_text) < 50: continue
                 
@@ -72,15 +71,11 @@ def main():
                 
                 if post_to_telegram(final_post):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
-                    print(f"✅ تم كسر الحماية والنشر من {src}")
-                    published += 1
+                    print(f"✅ نجاح النشر من {src}")
                     time.sleep(10)
-                    break 
-            
-            if published == 0:
-                print(f"ℹ️ {src}: لا تزال الصفحة ترفض إعطاء النصوص.")
+                    break
         except Exception as e:
-            print(f"⚠️ خطأ فني: {e}")
+            print(f"⚠️ المصدر {src} غير متاح حالياً عبر RSS: {e}")
 
 if __name__ == "__main__":
     main()
