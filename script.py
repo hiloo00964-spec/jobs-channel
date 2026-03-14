@@ -2,28 +2,20 @@ import os
 import subprocess
 import sys
 
-# --- ميزة التثبيت التلقائي للمكتبات المفقودة ---
+# تثبيت المكتبات المطلوبة تلقائياً
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 try:
-    import feedparser
-except ImportError:
-    print("🛠️ جاري تثبيت مكتبة feedparser...")
-    install('feedparser')
-    import feedparser
-
-try:
     import requests
 except ImportError:
-    print("🛠️ جاري تثبيت مكتبة requests...")
     install('requests')
     import requests
 
 import re
 import time
 
-# --- الإعدادات (Secrets) ---
+# --- الإعدادات (تأكد من وجودها في Secrets) ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
 GMY_API_KEY = os.getenv('GMY')
 MY_CHANNEL = os.getenv('TARGET_CHANNEL') 
@@ -34,7 +26,7 @@ def summarize_with_gemini(text):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
-            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط (المهنة، الشركة، المكان، التقديم). إذا لم تكن وظيفة أجب بكلمة 'تجاهل':\n\n{text}"}]}]
+            "contents": [{"parts": [{"text": f"أنت خبير توظيف عراقي. لخص الوظيفة التالية (المهنة، الشركة، الموقع، طريقة التقديم) كنقاط مختصرة. إذا لم تكن وظيفة اكتب 'تجاهل':\n\n{text}"}]}]
         }
         res = requests.post(url, json=payload, timeout=30)
         data = res.json()
@@ -57,23 +49,31 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # القنوات الستة
+    # المصادر الستة
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
+    
+    # رأس طلب متصفح حقيقي (بصمة متصفح أندرويد)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Mobile Safari/537.36'
+    }
 
     for src in SOURCES:
         try:
-            print(f"📡 محاولة سحب {src} عبر RSS...")
-            # استخدام سيرفر وسيط مختلف قليلاً لضمان العمل
-            rss_url = f"https://rsshub.app/telegram/channel/{src}"
-            feed = feedparser.parse(rss_url)
+            print(f"📡 فحص المصدر: {src}")
+            # السحب من نسخة الـ RSS المباشرة لتليجرام أو صفحة الويب المبسطة
+            res = requests.get(f"https://t.me/s/{src}", headers=headers, timeout=30)
+            
+            # استخراج النصوص بنمط "القبض العام" (سحب أي نص يقع بين الأوسمة)
+            messages = re.findall(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', res.text, re.DOTALL)
+            
+            if not messages:
+                print(f"ℹ️ {src}: لم تظهر نصوص، جاري تجربة النمط البديل..")
+                messages = re.findall(r'<div[^>]*dir="auto"[^>]*>(.*?)</div>', res.text, re.DOTALL)
 
-            if not feed.entries:
-                print(f"ℹ️ {src}: السيرفر الوسيط لم يستجب، جاري الانتقال للمصدر التالي.")
-                continue
-
-            for entry in feed.entries[:8]:
-                raw_content = entry.summary if 'summary' in entry else entry.title
-                clean_text = re.sub(r'<[^>]+>', '', raw_content).strip()
+            for msg_html in reversed(messages[-15:]):
+                # تنظيف النص وتحويل <br> لأسطر
+                clean_text = msg_html.replace('<br/>', '\n').replace('<br>', '\n')
+                clean_text = re.sub(r'<[^>]+>', '', clean_text).strip()
                 
                 if len(clean_text) < 50: continue
                 
@@ -87,11 +87,11 @@ def main():
                 
                 if post_to_telegram(final_post):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
-                    print(f"✅ تم النشر بنجاح من {src}")
+                    print(f"✅ تم بنجاح النشر من {src}")
                     time.sleep(10)
-                    break
+                    break 
         except Exception as e:
-            print(f"⚠️ خطأ في {src}: {e}")
+            print(f"⚠️ فشل {src}: {e}")
 
 if __name__ == "__main__":
     main()
