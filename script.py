@@ -2,7 +2,7 @@ import os
 import re
 import requests
 import time
-import xml.etree.ElementTree as ET
+import feedparser
 
 # --- الإعدادات ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
@@ -15,12 +15,14 @@ def summarize_with_gemini(text):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
-            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط (نوع الوظيفة، الشركة، المكان، التقديم). إذا لم تكن وظيفة أجب بكلمة 'تجاهل':\n\n{text}"}]}]
+            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط (المهنة، الشركة، المكان، التقديم). إذا لم تكن وظيفة أجب بكلمة 'تجاهل':\n\n{text}"}]}]
         }
         res = requests.post(url, json=payload, timeout=30)
         data = res.json()
-        ans = data['candidates'][0]['content']['parts'][0]['text'].strip()
-        return ans if "تجاهل" not in ans else "إهمال"
+        if 'candidates' in data:
+            ans = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            return ans if "تجاهل" not in ans else "إهمال"
+        return "إهمال"
     except: return "إهمال"
 
 def post_to_telegram(text):
@@ -36,28 +38,24 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # المصادر باستخدام جسر RSS (تجاوز حظر تليجرام)
+    # القنوات الستة
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
 
     for src in SOURCES:
         try:
-            print(f"📡 سحب البيانات عبر RSS للمصدر: {src}")
-            # نستخدم خدمة rsshub أو rss-bridge المفتوحة لتجاوز الحظر
+            print(f"📡 محاولة سحب {src} عبر RSS...")
+            # استخدام سيرفر وسيط لكسر حظر تليجرام
             rss_url = f"https://rsshub.app/telegram/channel/{src}"
-            res = requests.get(rss_url, timeout=30)
-            
-            # قراءة محتوى الـ XML
-            root = ET.fromstring(res.text)
-            items = root.findall('.//item')
+            feed = feedparser.parse(rss_url)
 
-            for item in items[:10]: # فحص آخر 10 منشورات
-                title = item.find('title').text if item.find('title') is not None else ""
-                description = item.find('description').text if item.find('description') is not None else ""
-                
-                # دمج العنوان والوصف للحصول على النص الكامل
-                full_text = f"{title}\n{description}"
-                # تنظيف النص من أكواد HTML
-                clean_text = re.sub(r'<[^>]+>', '', full_text).strip()
+            if not feed.entries:
+                print(f"ℹ️ المصدر {src}: لم يعطِ بيانات (قد يكون السيرفر مشغولاً).")
+                continue
+
+            for entry in feed.entries[:10]:
+                raw_text = entry.description if 'description' in entry else entry.summary
+                # تنظيف النص من HTML
+                clean_text = re.sub(r'<[^>]+>', '', raw_text).strip()
                 
                 if len(clean_text) < 50: continue
                 
@@ -71,11 +69,11 @@ def main():
                 
                 if post_to_telegram(final_post):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
-                    print(f"✅ نجاح النشر من {src}")
+                    print(f"✅ تم النشر من {src}")
                     time.sleep(10)
                     break
         except Exception as e:
-            print(f"⚠️ المصدر {src} غير متاح حالياً عبر RSS: {e}")
+            print(f"⚠️ خطأ في {src}: {e}")
 
 if __name__ == "__main__":
     main()
