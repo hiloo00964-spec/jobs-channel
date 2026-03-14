@@ -4,7 +4,7 @@ import requests
 import time
 import feedparser
 
-# --- الإعدادات ---
+# --- الإعدادات (تأكد من وجودها في Secrets) ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
 GMY_API_KEY = os.getenv('GMY')
 MY_CHANNEL = os.getenv('TARGET_CHANNEL') 
@@ -12,6 +12,7 @@ CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
 def summarize_with_gemini(text):
+    """تلخيص الوظيفة باستخدام جيميناي"""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
@@ -38,27 +39,28 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # القنوات الستة
+    # القنوات الستة المطلوبة
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
 
     for src in SOURCES:
         try:
-            print(f"📡 محاولة سحب {src} عبر RSS...")
-            # استخدام سيرفر وسيط لكسر حظر تليجرام
+            print(f"📡 سحب {src} عبر RSS...")
+            # استخدام سيرفر وسيط عالمي لكسر الحظر
             rss_url = f"https://rsshub.app/telegram/channel/{src}"
             feed = feedparser.parse(rss_url)
 
             if not feed.entries:
-                print(f"ℹ️ المصدر {src}: لم يعطِ بيانات (قد يكون السيرفر مشغولاً).")
+                print(f"ℹ️ {src}: لا توجد منشورات حالياً.")
                 continue
 
             for entry in feed.entries[:10]:
-                raw_text = entry.description if 'description' in entry else entry.summary
-                # تنظيف النص من HTML
-                clean_text = re.sub(r'<[^>]+>', '', raw_text).strip()
+                # تنظيف النص
+                raw_content = entry.summary if 'summary' in entry else entry.title
+                clean_text = re.sub(r'<[^>]+>', '', raw_content).strip()
                 
                 if len(clean_text) < 50: continue
                 
+                # بصمة المنشور لمنع التكرار
                 sig = clean_text[:80]
                 if sig in history: continue
                 
@@ -69,11 +71,11 @@ def main():
                 
                 if post_to_telegram(final_post):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
-                    print(f"✅ تم النشر من {src}")
+                    print(f"✅ تم النشر بنجاح من {src}")
                     time.sleep(10)
-                    break
+                    break # وظيفة واحدة من كل قناة بكل دورة
         except Exception as e:
-            print(f"⚠️ خطأ في {src}: {e}")
+            print(f"⚠️ خطأ في المصدر {src}: {e}")
 
 if __name__ == "__main__":
     main()
