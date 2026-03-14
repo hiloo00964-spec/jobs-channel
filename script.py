@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 
-# تثبيت المكتبات المطلوبة تلقائياً
+# التثبيت التلقائي للمكتبات
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
@@ -15,7 +15,7 @@ except ImportError:
 import re
 import time
 
-# --- الإعدادات (تأكد من وجودها في Secrets) ---
+# --- الإعدادات ---
 BOT_TOKEN = os.getenv('TOKNBOT') 
 GMY_API_KEY = os.getenv('GMY')
 MY_CHANNEL = os.getenv('TARGET_CHANNEL') 
@@ -26,7 +26,7 @@ def summarize_with_gemini(text):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         payload = {
-            "contents": [{"parts": [{"text": f"أنت خبير توظيف عراقي. لخص الوظيفة التالية (المهنة، الشركة، الموقع، طريقة التقديم) كنقاط مختصرة. إذا لم تكن وظيفة اكتب 'تجاهل':\n\n{text}"}]}]
+            "contents": [{"parts": [{"text": f"لخص هذه الوظيفة العراقية كنقاط مختصرة (المهنة، الشركة، المكان، التقديم). إذا لم تكن وظيفة أكتب 'تجاهل':\n\n{text}"}]}]
         }
         res = requests.post(url, json=payload, timeout=30)
         data = res.json()
@@ -49,29 +49,34 @@ def main():
         with open(DB_FILE, 'w', encoding='utf-8') as f: f.write("START\n")
     with open(DB_FILE, 'r', encoding='utf-8') as f: history = f.read().splitlines()
 
-    # المصادر الستة
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
     
-    # رأس طلب متصفح حقيقي (بصمة متصفح أندرويد)
+    # بصمة متصفح ويندوز حديثة جداً لخداع نظام الحماية
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Mobile Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
     }
 
     for src in SOURCES:
         try:
-            print(f"📡 فحص المصدر: {src}")
-            # السحب من نسخة الـ RSS المباشرة لتليجرام أو صفحة الويب المبسطة
-            res = requests.get(f"https://t.me/s/{src}", headers=headers, timeout=30)
+            print(f"📡 محاولة اختراق حماية المصدر: {src}")
+            # إضافة رقم عشوائي للرابط لتجاوز الكاش ومنع تليجرام من تقديم صفحة قديمة/فارغة
+            res = requests.get(f"https://t.me/s/{src}?before={int(time.time())}", headers=headers, timeout=30)
             
-            # استخراج النصوص بنمط "القبض العام" (سحب أي نص يقع بين الأوسمة)
+            # محاولة سحب الرسائل باستخدام 3 أنماط مختلفة (لضمان اللقط)
             messages = re.findall(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', res.text, re.DOTALL)
-            
             if not messages:
-                print(f"ℹ️ {src}: لم تظهر نصوص، جاري تجربة النمط البديل..")
                 messages = re.findall(r'<div[^>]*dir="auto"[^>]*>(.*?)</div>', res.text, re.DOTALL)
+            if not messages:
+                messages = re.findall(r'<div class="js-message_text[^>]*>(.*?)</div>', res.text, re.DOTALL)
 
+            found_in_src = 0
             for msg_html in reversed(messages[-15:]):
-                # تنظيف النص وتحويل <br> لأسطر
                 clean_text = msg_html.replace('<br/>', '\n').replace('<br>', '\n')
                 clean_text = re.sub(r'<[^>]+>', '', clean_text).strip()
                 
@@ -87,9 +92,13 @@ def main():
                 
                 if post_to_telegram(final_post):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
-                    print(f"✅ تم بنجاح النشر من {src}")
+                    print(f"✅ نجاح النشر من {src}")
+                    found_in_src += 1
                     time.sleep(10)
                     break 
+            
+            if found_in_src == 0:
+                print(f"ℹ️ {src}: لم يتم العثور على محتوى جديد (تليجرام قد يكون حجب السيرفر).")
         except Exception as e:
             print(f"⚠️ فشل {src}: {e}")
 
