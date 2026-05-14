@@ -28,10 +28,15 @@ jobs:
           GMY: ${{ secrets.GMY }}
           TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
           MY_CHANNEL_LINK: ${{ secrets.MY_CHANNEL_LINK }}
-        # التعديل الجذري هنا لإنهاء مشكلة المسار المكرر
+        # هذا الأمر سيبحث عن مكان الملف الحقيقي ويشغله فوراً
         run: |
-          cd $GITHUB_WORKSPACE
-          python script.py
+          SCRIPT_PATH=$(find . -name "script.py" -print -quit)
+          if [ -z "$SCRIPT_PATH" ]; then
+            echo "❌ Error: script.py not found anywhere in the repo!"
+            exit 1
+          fi
+          echo "🚀 Found script at: $SCRIPT_PATH"
+          python "$SCRIPT_PATH"
 
       - name: Save History
         run: |
