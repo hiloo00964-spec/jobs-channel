@@ -28,8 +28,10 @@ jobs:
           GMY: ${{ secrets.GMY }}
           TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
           MY_CHANNEL_LINK: ${{ secrets.MY_CHANNEL_LINK }}
-        # التعديل الجوهري هنا: التشغيل المباشر للملف الظاهر في صورتك
-        run: python script.py
+        # التعديل الجذري هنا لإنهاء مشكلة المسار المكرر
+        run: |
+          cd $GITHUB_WORKSPACE
+          python script.py
 
       - name: Save History
         run: |
