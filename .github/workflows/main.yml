@@ -20,7 +20,7 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install requests google-generativeai
+        run: pip install requests
 
       - name: Run script
         env:
@@ -28,7 +28,6 @@ jobs:
           GMY: ${{ secrets.GMY }}
           TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
           MY_CHANNEL_LINK: ${{ secrets.MY_CHANNEL_LINK }}
-          TEWQQ1: ${{ secrets.TEWQQ1 }}
         run: python script.py
 
       - name: Save History
