@@ -1,7 +1,7 @@
 name: Jobs Auto Bot
 on:
   schedule:
-    - cron: '0 6-20 * * *' # يشتغل كل ساعة من الـ 9 صباحاً للـ 11 ليلاً بتوقيت العراق
+    - cron: '0 6-20 * * *' 
   workflow_dispatch: 
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
           GMY: ${{ secrets.GMY }}
           TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
           MY_CHANNEL_LINK: ${{ secrets.MY_CHANNEL_LINK }}
-        # التعديل هنا: تشغيل الملف مباشرة من المسار الرئيسي
+        # التعديل الجوهري هنا: التشغيل المباشر للملف الظاهر في صورتك
         run: python script.py
 
       - name: Save History
