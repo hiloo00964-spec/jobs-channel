@@ -1,0 +1,38 @@
+name: Jobs Auto Bot
+on:
+  schedule:
+    - cron: '0 6-20 * * *' # كل ساعة من 9 صباحاً لـ 11 ليلاً بتوقيت العراق
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run script
+        env:
+          TOKNBOT: ${{ secrets.TOKNBOT }}
+          GMY: ${{ secrets.GMY }}
+          TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
+          MY_CHANNEL_LINK: ${{ secrets.MY_CHANNEL_LINK }}
+        run: python script.py
+
+      - name: Save History
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add jobs_history.txt || echo "No change"
+          git commit -m "Update history" && git push || echo "No change"
