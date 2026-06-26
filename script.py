@@ -11,8 +11,13 @@ MY_CHANNEL = os.getenv('TARGET_CHANNEL')
 CHANNEL_LINK = os.getenv('MY_CHANNEL_LINK')
 DB_FILE = "jobs_history.txt"
 
+def is_work_time():
+    """فحص وقت العمل بتوقيت العراق (UTC+3) من 9 صباحاً إلى 11 مساءً"""
+    current_hour = (datetime.utcnow().hour + 3) % 24
+    return 9 <= current_hour <= 23
+
 def smart_clean_with_gemini(text):
-    """تنظيف ذكي للإعلانات باستخدام جيميناي"""
+    """تنظيف ذكي للإعلانات باستخدام جيميناي مع كشف الأخطاء"""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         prompt = (
@@ -26,22 +31,43 @@ def smart_clean_with_gemini(text):
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         res = requests.post(url, json=payload, timeout=30)
         data = res.json()
+        
         if 'candidates' in data:
             return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        return text 
-    except: return text
+        else:
+            print(f"⚠️ جيميناي أرجع استجابة غير متوقعة: {data}")
+            return text 
+    except Exception as e: 
+        print(f"⚠️ خطأ أثناء الاتصال بجيميناي: {e}")
+        return text
 
 def post_to_telegram(text):
-    """نشر الوظيفة في قناة التليجرام"""
+    """نشر الوظيفة في قناة التليجرام مع طباعة الخطأ إن وجد"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         final_msg = f"💼 *إعلان وظيفة جديد*\n\n{text}\n\n📍 للمزيد اشترك معنا:\n{CHANNEL_LINK}"
-        payload = {'chat_id': MY_CHANNEL, 'text': final_msg, 'parse_mode': 'Markdown', 'disable_web_page_preview': True}
-        r = requests.post(url, data=payload)
-        return r.status_code == 200
-    except: return False
+        payload = {
+            'chat_id': MY_CHANNEL, 
+            'text': final_msg, 
+            'parse_mode': 'Markdown', 
+            'disable_web_page_preview': True
+        }
+        r = requests.post(url, data=payload, timeout=15)
+        
+        if r.status_code == 200:
+            return True
+        else:
+            print(f"❌ فشل إرسال التليجرام: كود الخطأ {r.status_code} - التفاصيل: {r.text}")
+            return False
+    except Exception as e: 
+        print(f"⚠️ خطأ اتصال بسيرفر التليجرام: {e}")
+        return False
 
 def main():
+    if not is_work_time():
+        print("🌙 خارج وقت العمل المحدد (9 صباحاً - 11 مساءً بتوقيت العراق). تم إيقاف الدورة لحفظ الجهد.")
+        return
+
     print(f"🚀 بدء عملية فحص الوظائف: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     if not os.path.exists(DB_FILE):
@@ -50,7 +76,6 @@ def main():
     with open(DB_FILE, 'r', encoding='utf-8') as f: 
         history = f.read().splitlines()
 
-    # مصادر الوظائف العراقية المتفق عليها
     SOURCES = ['iraq_jobs_1', 'engahmad88', 'J_C_UOT', 'Muhannad_job', 'jobs_for_us', 'YSPjobs']
     headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -64,18 +89,23 @@ def main():
                 clean_text = re.sub(r'<[^>]+>', '', msg_html.replace('<br/>', '\n').replace('<br>', '\n')).strip()
                 if len(clean_text) < 50: continue
                 
-                sig = clean_text[:80] # بصمة التحقق
+                sig = clean_text[:80]
                 if sig in history: continue
                 
                 print(f"✨ معالجة وظيفة جديدة من {src}...")
                 processed_text = smart_clean_with_gemini(clean_text)
-                if "إهمال" in processed_text: continue
+                
+                if "إهمال" in processed_text:
+                    print(f"🗑️ جيميناي حدد هذا المنشور كـ 'إهمال' (إعلان وليس وظيفة).")
+                    continue
                 
                 if post_to_telegram(processed_text):
                     with open(DB_FILE, 'a', encoding='utf-8') as f: f.write(sig + "\n")
                     print(f"✅ تم النشر بنجاح.")
                     time.sleep(5)
                     break 
+                else:
+                    print(f"⏭️ فشل النشر الحالي، جاري الانتقال للمنشور التالي...")
         except Exception as e:
             print(f"⚠️ خطأ في {src}: {e}")
 
