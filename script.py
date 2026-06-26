@@ -17,9 +17,10 @@ def is_work_time():
     return 9 <= current_hour <= 23
 
 def smart_clean_with_gemini(text):
-    """تنظيف ذكي للإعلانات باستخدام جيميناي مع كشف الأخطاء"""
+    """تنظيف ذكي للإعلانات باستخدام جيميناي بالإصدار المستقر v1"""
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
+        # تحديث الرابط للإصدار المستقر v1 لحل مشكلة الـ 404
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GMY_API_KEY}"
         prompt = (
             "أنت مساعد ذكي لتنظيف إعلانات الوظائف. قم بإعادة صياغة النص التالي مع الالتزام بالقواعد:\n"
             "1. حافظ على النص الأصلي وتفاصيل الوظيفة (المهام، الشروط، الموقع) كما هي دون اختصار.\n"
@@ -42,7 +43,7 @@ def smart_clean_with_gemini(text):
         return text
 
 def post_to_telegram(text):
-    """نشر الوظيفة في قناة التليجرام مع طباعة الخطأ إن وجد"""
+    """نشر الوظيفة في قناة التليجرام مع محاولة الإرسال الآمن"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         final_msg = f"💼 *إعلان وظيفة جديد*\n\n{text}\n\n📍 للمزيد اشترك معنا:\n{CHANNEL_LINK}"
@@ -56,9 +57,17 @@ def post_to_telegram(text):
         
         if r.status_code == 200:
             return True
-        else:
-            print(f"❌ فشل إرسال التليجرام: كود الخطأ {r.status_code} - التفاصيل: {r.text}")
-            return False
+            
+        # حل ذكي: إذا رفض التليجرام النص بسبب علامات الماركداون، نرسله فوراً كنص عادي
+        if "can't parse entities" in r.text:
+            print("⚠️ مشكلة في رموز التنسيق، جاري إعادة المحاولة بنص عادي...")
+            payload.pop('parse_mode', None) # إزالة التنسيق المعقد
+            r = requests.post(url, data=payload, timeout=15)
+            if r.status_code == 200:
+                return True
+                
+        print(f"❌ فشل إرسال التليجرام: كود الخطأ {r.status_code} - التفاصيل: {r.text}")
+        return False
     except Exception as e: 
         print(f"⚠️ خطأ اتصال بسيرفر التليجرام: {e}")
         return False
