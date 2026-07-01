@@ -55,7 +55,7 @@ def post_to_telegram(text):
     """نشر الوظيفة في قناة التليجرام مع محاولة الإرسال الآمن وتخطي أخطاء الرموز"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        final_msg = f"💼 *إعلان وظيفة جديد*\n\n{text}\n\n📍 للمزيد اشترك معنا:\n{CHANNEL_LINK}"
+        final_msg = f"💼 *إعلان وظيفة جديد*\n\n{text}\n\n#وظائف_العراق #فرص_عمل #توظيف #قلعة_الوظائف_العراقية\n\n📍 للمزيد اشترك معنا:\n{CHANNEL_LINK}"
         payload = {
             'chat_id': MY_CHANNEL, 
             'text': final_msg, 
